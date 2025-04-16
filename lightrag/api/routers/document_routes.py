@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 from lightrag import LightRAG
 from lightrag.base import DocProcessingStatus, DocStatus
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.utils.document_converter import DocumentConverter
 from ..config import global_args
 
 router = APIRouter(
@@ -404,175 +405,26 @@ async def pipeline_enqueue_file(rag: LightRAG, file_path: Path) -> bool:
     """
 
     try:
-        content = ""
-        ext = file_path.suffix.lower()
+        # Initialize the DocumentConverter with the configured engine
+        converter = DocumentConverter(engine=global_args.document_loading_engine)
 
-        file = None
-        async with aiofiles.open(file_path, "rb") as f:
-            file = await f.read()
+        # Convert the document to text
+        try:
+            content = converter.convert_file(file_path)
+        except Exception as e:
+            logger.error(f"Error converting file {file_path.name}: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False
 
-        # Process based on file type
-        match ext:
-            case (
-                ".txt"
-                | ".md"
-                | ".html"
-                | ".htm"
-                | ".tex"
-                | ".json"
-                | ".xml"
-                | ".yaml"
-                | ".yml"
-                | ".rtf"
-                | ".odt"
-                | ".epub"
-                | ".csv"
-                | ".log"
-                | ".conf"
-                | ".ini"
-                | ".properties"
-                | ".sql"
-                | ".bat"
-                | ".sh"
-                | ".c"
-                | ".cpp"
-                | ".py"
-                | ".java"
-                | ".js"
-                | ".ts"
-                | ".swift"
-                | ".go"
-                | ".rb"
-                | ".php"
-                | ".css"
-                | ".scss"
-                | ".less"
-            ):
-                try:
-                    # Try to decode as UTF-8
-                    content = file.decode("utf-8")
-
-                    # Validate content
-                    if not content or len(content.strip()) == 0:
-                        logger.error(f"Empty content in file: {file_path.name}")
-                        return False
-
-                    # Check if content looks like binary data string representation
-                    if content.startswith("b'") or content.startswith('b"'):
-                        logger.error(
-                            f"File {file_path.name} appears to contain binary data representation instead of text"
-                        )
-                        return False
-
-                except UnicodeDecodeError:
-                    logger.error(
-                        f"File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing."
-                    )
-                    return False
-            case ".pdf":
-                if global_args.document_loading_engine == "DOCLING":
-                    if not pm.is_installed("docling"):  # type: ignore
-                        pm.install("docling")
-                    from docling.document_converter import DocumentConverter  # type: ignore
-
-                    converter = DocumentConverter()
-                    result = converter.convert(file_path)
-                    content = result.document.export_to_markdown()
-                else:
-                    if not pm.is_installed("pypdf2"):  # type: ignore
-                        pm.install("pypdf2")
-                    from PyPDF2 import PdfReader  # type: ignore
-                    from io import BytesIO
-
-                    pdf_file = BytesIO(file)
-                    reader = PdfReader(pdf_file)
-                    for page in reader.pages:
-                        content += page.extract_text() + "\n"
-            case ".docx":
-                if global_args.document_loading_engine == "DOCLING":
-                    if not pm.is_installed("docling"):  # type: ignore
-                        pm.install("docling")
-                    from docling.document_converter import DocumentConverter  # type: ignore
-
-                    converter = DocumentConverter()
-                    result = converter.convert(file_path)
-                    content = result.document.export_to_markdown()
-                else:
-                    if not pm.is_installed("python-docx"):  # type: ignore
-                        try:
-                            pm.install("python-docx")
-                        except Exception:
-                            pm.install("docx")
-                    from docx import Document  # type: ignore
-                    from io import BytesIO
-
-                    docx_file = BytesIO(file)
-                    doc = Document(docx_file)
-                    content = "\n".join(
-                        [paragraph.text for paragraph in doc.paragraphs]
-                    )
-            case ".pptx":
-                if global_args.document_loading_engine == "DOCLING":
-                    if not pm.is_installed("docling"):  # type: ignore
-                        pm.install("docling")
-                    from docling.document_converter import DocumentConverter  # type: ignore
-
-                    converter = DocumentConverter()
-                    result = converter.convert(file_path)
-                    content = result.document.export_to_markdown()
-                else:
-                    if not pm.is_installed("python-pptx"):  # type: ignore
-                        pm.install("pptx")
-                    from pptx import Presentation  # type: ignore
-                    from io import BytesIO
-
-                    pptx_file = BytesIO(file)
-                    prs = Presentation(pptx_file)
-                    for slide in prs.slides:
-                        for shape in slide.shapes:
-                            if hasattr(shape, "text"):
-                                content += shape.text + "\n"
-            case ".xlsx":
-                if global_args.document_loading_engine == "DOCLING":
-                    if not pm.is_installed("docling"):  # type: ignore
-                        pm.install("docling")
-                    from docling.document_converter import DocumentConverter  # type: ignore
-
-                    converter = DocumentConverter()
-                    result = converter.convert(file_path)
-                    content = result.document.export_to_markdown()
-                else:
-                    if not pm.is_installed("openpyxl"):  # type: ignore
-                        pm.install("openpyxl")
-                    from openpyxl import load_workbook  # type: ignore
-                    from io import BytesIO
-
-                    xlsx_file = BytesIO(file)
-                    wb = load_workbook(xlsx_file)
-                    for sheet in wb:
-                        content += f"Sheet: {sheet.title}\n"
-                        for row in sheet.iter_rows(values_only=True):
-                            content += (
-                                "\t".join(
-                                    str(cell) if cell is not None else ""
-                                    for cell in row
-                                )
-                                + "\n"
-                            )
-                        content += "\n"
-            case _:
-                logger.error(
-                    f"Unsupported file type: {file_path.name} (extension {ext})"
-                )
-                return False
+        # Validate content
+        if not content or len(content.strip()) == 0:
+            logger.error(f"Empty content in file: {file_path.name}")
+            return False
 
         # Insert into the RAG queue
-        if content:
-            await rag.apipeline_enqueue_documents(content, file_paths=file_path.name)
-            logger.info(f"Successfully fetched and enqueued file: {file_path.name}")
-            return True
-        else:
-            logger.error(f"No content could be extracted from file: {file_path.name}")
+        await rag.apipeline_enqueue_documents(content, file_paths=file_path.name)
+        logger.info(f"Successfully fetched and enqueued file: {file_path.name}")
+        return True
 
     except Exception as e:
         logger.error(f"Error processing or enqueueing file {file_path.name}: {str(e)}")

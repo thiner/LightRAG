@@ -288,6 +288,25 @@ def parse_args() -> argparse.Namespace:
     args.embedding_model = get_env_value("EMBEDDING_MODEL", "bge-m3:latest")
     args.embedding_dim = get_env_value("EMBEDDING_DIM", 1024, int)
     args.max_embed_tokens = get_env_value("MAX_EMBED_TOKENS", 8192, int)
+    
+    # for document converters
+    args.docx_reader = get_env_value("DOCX_READER", "python-docx")
+    args.docx_reader_version = get_env_value("DOCX_READER_VERSION", "latest")
+    args.docx_reader_fallback = get_env_value("DOCX_READER_FALLBACK", "docx")
+    args.docx_reader_fallback_version = get_env_value(
+        "DOCX_READER_FALLBACK_VERSION", "latest"
+    )
+    args.pptx_reader = get_env_value("PPTX_READER", "python-pptx")
+    args.pptx_reader_version = get_env_value("PPTX_READER_VERSION", "latest")
+    args.pptx_reader_fallback = get_env_value("PPTX_READER_FALLBACK", "pptx")
+    args.pptx_reader_fallback_version = get_env_value(
+        "PPTX_READER_FALLBACK_VERSION", "latest"
+    )
+    args.xlsx_reader = get_env_value("XLSX_READER", "openpyxl")
+    args.xlsx_reader_version = get_env_value("XLSX_READER_VERSION", "latest")
+    args.doc_converter = get_env_value("DOC_CONVERTER", "docling")
+    args.doc_converter_version = get_env_value("DOC_CONVERTER_VERSION", "latest")
+    args.max_file_size_mb = get_env_value("MAX_FILE_SIZE_MB", 10, int)
 
     # Inject chunk configuration
     args.chunk_size = get_env_value("CHUNK_SIZE", 1200, int)
